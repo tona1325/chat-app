@@ -1,4 +1,14 @@
 -- CreateTable
+CREATE TABLE "public.User" (
+    "id" SERIAL NOT NULL, -- SERIAL là kiểu PostgreSQL cho integer tự tăng và làm khóa chính
+    "username" TEXT NOT NULL,
+    "password" TEXT NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, -- TIMESTAMP(3) để có độ chính xác mili giây giống DateTime của Prisma
+
+    CONSTRAINT "User_pkey" PRIMARY KEY ("id") -- Khai báo khóa chính tường minh
+);
+
+
 CREATE TABLE "User" (
     "id" SERIAL NOT NULL, -- SERIAL là kiểu PostgreSQL cho integer tự tăng và làm khóa chính
     "username" TEXT NOT NULL,

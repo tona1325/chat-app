@@ -1,0 +1,30 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  username  String   @unique // Đơn giản hóa, dùng username thay email
+  password  String   // Sẽ lưu trữ hash
+  createdAt DateTime @default(now())
+  messages  Message[] // Relation to messages sent by this user
+}
+
+model Message {
+  id        Int      @id @default(autoincrement())
+  text      String
+  room      String   // Tên phòng chat
+  createdAt DateTime @default(now())
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@index([room, createdAt]) // Index để query lịch sử chat theo phòng nhanh hơn
+}

@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Real-Time Chat</title>
+    <link rel="stylesheet" href="style.css">
+     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body>
+    <div id="app-container">
+        <div id="sidebar">
+            <h3>Rooms</h3>
+            <ul id="room-list">
+                <!-- Các phòng sẽ được thêm ở đây, có thể hardcode vài phòng ban đầu -->
+                <li data-room="general">General</li>
+                <li data-room="random">Random</li>
+                <li data-room="tech">Tech Talk</li>
+            </ul>
+            <div id="create-room">
+                <input type="text" id="new-room-name" placeholder="New room name">
+                <button id="create-room-btn">Create & Join</button>
+            </div>
+             <p>Logged in as: <strong id="display-username"></strong></p>
+             <button id="logout-btn">Logout</button>
+        </div>
+
+        <div id="chat-container">
+            <h2 id="current-room-title">Select a Room</h2>
+            <div id="messages">
+                <!-- Tin nhắn sẽ xuất hiện ở đây -->
+            </div>
+             <p id="typing-indicator" style="display: none; font-style: italic;"></p>
+            <div id="input-area">
+                <input type="text" id="message-input" placeholder="Enter message..." autocomplete="off" disabled>
+                <button id="send-button" disabled>Send</button>
+            </div>
+             <p id="error-message" style="color: red;"></p>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script> <!-- Socket.IO client library -->
+    <script src="client.js"></script> <!-- File JS của chúng ta -->
+</body>
+</html>

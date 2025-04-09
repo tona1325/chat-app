@@ -1,0 +1,17 @@
+# Dependencies
+node_modules/
+
+# Prisma
+# Không ignore migration vì Render cần nó để deploy
+# migrations/
+
+# Environment variables
+.env
+
+# Log files
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Optional Folder
+dist/

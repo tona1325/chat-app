@@ -3,25 +3,25 @@
   "version": "1.0.0",
   "description": "Real-time chat application",
   "main": "server.js",
-  "scripts": {
-    "start": "node server.js", // Lệnh chạy app
-    "dev": "nodemon server.js", // Tùy chọn: dùng nodemon để dev
-    "build": "npx prisma generate", // Lệnh này Render cần để generate Prisma client
-    "migrate:dev": "npx prisma migrate dev", // Chạy migrate khi dev
-    "migrate:deploy": "npx prisma migrate deploy" // Chạy migrate khi deploy
-  },
+   "scripts": {
+   "start": "node server.js",
+   "dev": "nodemon server.js",
+   "build": "npx prisma generate",
+   "migrate:dev": "npx prisma migrate dev",
+   "migrate:deploy": "npx prisma migrate deploy"
+ }, 
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@prisma/client": "^5.x.x", // Thay x.x bằng version bạn cài
+    "@prisma/client": "^5.x.x", 
     "bcrypt": "^5.x.x",
     "dotenv": "^16.x.x",
     "express": "^4.x.x",
     "socket.io": "^4.x.x"
   },
   "devDependencies": {
-    "nodemon": "^3.x.x", // Tùy chọn
-    "prisma": "^5.x.x" // Thay x.x bằng version bạn cài
+    "nodemon": "^3.x.x", 
+    "prisma": "^5.x.x" 
   }
 }

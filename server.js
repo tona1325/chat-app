@@ -88,45 +88,75 @@ app.post('/login', async (req, res) => {
 // --- Socket.IO Logic ---
 const activeUsers = {}; // Lưu thông tin user đang kết nối { socketId: { username, userId, currentRoom } }
 
+// server.js
+
+// ... các phần khác ...
+
 io.on('connection', (socket) => {
-    console.log('A user connected:', socket.id);
+    // ... các hàm xử lý khác (joinRoom, disconnect, ...)
 
-    // Xử lý khi user tham gia phòng chat
-    socket.on('joinRoom', async ({ username, userId, room }) => {
-        console.log(`${username} (ID: ${userId}) is joining room: ${room}`);
-
-        // Lưu thông tin user và phòng hiện tại
-        activeUsers[socket.id] = { username, userId, currentRoom: room };
-
-        // Tham gia vào "room" của Socket.IO
-        socket.join(room);
-
-        // Thông báo cho những người khác trong phòng là có người mới vào
-        socket.to(room).emit('userJoined', { username });
-
-        // Gửi lịch sử chat của phòng này cho user vừa vào
-        try {
-            const messages = await prisma.message.findMany({
-                where: { room: room },
-                orderBy: { createdAt: 'asc' },
-                take: 50, // Lấy 50 tin nhắn gần nhất
-                include: { user: { select: { username: true } } } // Lấy cả username của người gửi
-            });
-            socket.emit('loadHistory', messages.map(msg => ({
-                username: msg.user.username, // Lấy từ relation
-                text: msg.text,
-                room: msg.room,
-                createdAt: msg.createdAt
-            })));
-             // Thông báo cho user biết đã vào phòng thành công
-            socket.emit('joinedRoom', { room });
-        } catch (error) {
-            console.error(`Error fetching history for room ${room}:`, error);
-            // Có thể emit lỗi về client nếu cần
+    // SỬA TRONG HÀM NÀY:
+    socket.on('sendMessage', async (data) => {
+        const senderInfo = activeUsers[socket.id];
+        if (!senderInfo) {
+            console.error("Error: User info not found for socket:", socket.id);
+            socket.emit('chatError', { message: 'Authentication error. Please refresh.' });
+            return;
         }
 
+        const { message, room } = data;
+        const { username, userId } = senderInfo; // userId ở đây là string
+
+        console.log(`Message from ${username} in room ${room}: ${message}`);
+
+        if(!room) {
+            console.error("Error: Room not specified by client.");
+            socket.emit('chatError', { message: 'No room selected.' });
+            return;
+        }
+
+        // --- THÊM BƯỚC CHUYỂN ĐỔI ---
+        const numericUserId = parseInt(userId, 10); // Chuyển userId sang số nguyên (hệ 10)
+
+        // Kiểm tra xem chuyển đổi có thành công không (quan trọng nếu userId có thể không hợp lệ)
+        if (isNaN(numericUserId)) {
+            console.error(`Invalid userId format received for user ${username}: ${userId}`);
+             socket.emit('chatError', { message: 'Internal server error processing your request.' });
+            return;
+        }
+        // --- KẾT THÚC BƯỚC CHUYỂN ĐỔI ---
+
+
+        // Lưu tin nhắn vào database
+        try {
+            const savedMessage = await prisma.message.create({
+                data: {
+                    text: message,
+                    room: room,
+                    // Sử dụng giá trị số nguyên đã chuyển đổi
+                    userId: numericUserId,
+                }
+            });
+
+            // Gửi tin nhắn đến tất cả mọi người trong phòng đó (bao gồm cả người gửi)
+            io.to(room).emit('newMessage', {
+                username: username,
+                text: savedMessage.text,
+                room: savedMessage.room,
+                createdAt: savedMessage.createdAt
+            });
+
+        } catch (error) {
+            console.error("Error saving message:", error);
+            // Có thể gửi thông báo lỗi cụ thể hơn nếu là validation error, nhưng lỗi chung cũng được
+            socket.emit('chatError', { message: 'Error sending message.' });
+        }
     });
 
+    // ... các hàm xử lý khác ...
+});
+
+// ... phần khởi động server ...
     // Xử lý khi user gửi tin nhắn
     socket.on('sendMessage', async (data) => {
         const senderInfo = activeUsers[socket.id];

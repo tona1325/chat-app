@@ -1,9 +1,7 @@
 # Dependencies
 node_modules/
 
-# Prisma
-# Không ignore migration vì Render cần nó để deploy
-# migrations/
+
 
 # Environment variables
 .env

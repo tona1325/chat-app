@@ -1,300 +1,215 @@
 // server.js
-require('dotenv').config(); // Load biến môi trường từ .env
+require('dotenv').config();
 const express = require('express');
 const http = require('http');
 const { Server } = require("socket.io");
 const { PrismaClient } = require('@prisma/client');
 const bcrypt = require('bcrypt');
-const path = require('path'); // Thêm path để xử lý đường dẫn file
 
 const prisma = new PrismaClient();
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server);
+const io = new Server(server, {
+    // Cấu hình thêm nếu cần (ví dụ: CORS cho môi trường dev khác)
+    // cors: {
+    //   origin: "http://localhost:8080", // Địa chỉ frontend dev nếu khác port
+    //   methods: ["GET", "POST"]
+    // }
+});
 
 const PORT = process.env.PORT || 3000;
 const saltRounds = 10;
 
-app.use(express.json()); // Middleware để parse JSON request body
-app.use(express.static(path.join(__dirname, 'public'))); // Phục vụ các file tĩnh trong thư mục 'public' một cách chuẩn hơn
+app.use(express.json());
+app.use(express.static('public'));
 
 // --- Routes ---
-
-// Route cơ bản để phục vụ trang login (trang gốc)
 app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'login.html'));
+    res.sendFile(__dirname + '/public/login.html');
 });
 
-// Các route khác cũng nên dùng path.join cho an toàn
-app.get('/login.html', (req, res) => {
-     res.sendFile(path.join(__dirname, 'public', 'login.html'));
-});
-app.get('/index.html', (req, res) => {
-     res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
-
-
-// Route đăng ký
 app.post('/signup', async (req, res) => {
     const { username, password } = req.body;
-
     if (!username || !password) {
-        console.log("Signup attempt failed: Missing username or password");
         return res.status(400).json({ message: 'Username and password are required' });
     }
-
     try {
-        console.log(`Signup attempt for username: ${username}`);
         const existingUser = await prisma.user.findUnique({ where: { username } });
         if (existingUser) {
-            console.log(`Signup failed: Username ${username} already taken`);
             return res.status(409).json({ message: 'Username already taken' });
         }
-
         const hashedPassword = await bcrypt.hash(password, saltRounds);
         const newUser = await prisma.user.create({
-            data: {
-                username,
-                password: hashedPassword,
-            },
+            data: { username, password: hashedPassword },
         });
-        console.log('User created successfully:', newUser.username, 'ID:', newUser.id);
-        // Không trả về password hash
-        res.status(201).json({ message: 'User created successfully', userId: newUser.id, username: newUser.username });
-
+        console.log('User created:', newUser.username);
+        res.status(201).json({ message: 'User created successfully. Please login.', userId: newUser.id, username: newUser.username });
     } catch (error) {
-        console.error("!!! SIGNUP SERVER ERROR !!!:", error); // Log lỗi chi tiết ra console backend
-        res.status(500).json({ message: 'Internal server error during signup' }); // Thông báo lỗi chung chung cho client
+        console.error("Signup Error:", error);
+        res.status(500).json({ message: 'Error creating user' });
     }
 });
 
-// Route đăng nhập
 app.post('/login', async (req, res) => {
     const { username, password } = req.body;
-
     if (!username || !password) {
-        console.log("Login attempt failed: Missing username or password");
         return res.status(400).json({ message: 'Username and password are required' });
     }
-
     try {
-        console.log(`Login attempt for username: ${username}`);
         const user = await prisma.user.findUnique({ where: { username } });
         if (!user) {
-            console.log(`Login failed: User ${username} not found`);
             return res.status(401).json({ message: 'Invalid credentials' });
         }
-
         const isMatch = await bcrypt.compare(password, user.password);
         if (!isMatch) {
-            console.log(`Login failed: Incorrect password for ${username}`);
             return res.status(401).json({ message: 'Invalid credentials' });
         }
-
-        console.log('User logged in successfully:', user.username, 'ID:', user.id);
-        // Đăng nhập thành công, trả về thông tin user (không có password)
+        console.log('User logged in:', user.username);
         res.status(200).json({ message: 'Login successful', userId: user.id, username: user.username });
-
     } catch (error) {
-        console.error("!!! LOGIN SERVER ERROR !!!:", error); // Log lỗi chi tiết
-        res.status(500).json({ message: 'Internal server error during login' });
+        console.error("Login Error:", error);
+        res.status(500).json({ message: 'Error logging in' });
     }
 });
 
-
 // --- Socket.IO Logic ---
-const activeUsers = {}; // Lưu thông tin user đang kết nối { socketId: { username, userId, currentRoom } }
+const activeUsers = {}; // { socketId: { username, userId, currentRoom } }
 
 io.on('connection', (socket) => {
-    console.log('A user connected via Socket.IO:', socket.id);
+    console.log('A user connected:', socket.id);
 
-    // Xử lý khi user tham gia phòng chat
     socket.on('joinRoom', async ({ username, userId, room }) => {
-        // userId từ client đến đây có thể vẫn là string từ localStorage
-        const currentUserId = userId; // Giữ lại giá trị gốc nếu cần
-        const currentUsername = username;
-        const targetRoom = room;
+        console.log(`${username} (ID: ${userId}) is joining room: ${room}`);
+        activeUsers[socket.id] = { username, userId, currentRoom: room };
+        socket.join(room);
+        socket.to(room).emit('userJoined', { username });
 
-        if (!currentUserId || !currentUsername || !targetRoom) {
-             console.error("Join room failed: Missing data", { username, userId, room });
-             socket.emit('chatError', { message: 'Failed to join room. Invalid data.' });
-             return;
-        }
-
-        console.log(`${currentUsername} (ID: ${currentUserId}, Socket: ${socket.id}) is joining room: ${targetRoom}`);
-
-        // Lưu thông tin user và phòng hiện tại vào activeUsers
-        // userId lưu ở đây vẫn có thể là string, sẽ xử lý khi cần dùng cho Prisma
-        activeUsers[socket.id] = { username: currentUsername, userId: currentUserId, currentRoom: targetRoom };
-
-        // Tham gia vào "room" của Socket.IO
-        socket.join(targetRoom);
-
-        // Thông báo cho những người khác trong phòng là có người mới vào
-        socket.to(targetRoom).emit('userJoined', { username: currentUsername });
-
-        // Gửi lịch sử chat của phòng này cho user vừa vào
         try {
+            // ** Lấy lịch sử trong 24 giờ gần nhất **
+            const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
             const messages = await prisma.message.findMany({
-                where: { room: targetRoom },
+                where: {
+                    room: room,
+                    createdAt: { gte: twentyFourHoursAgo } // Chỉ lấy tin nhắn >= 24h trước
+                },
                 orderBy: { createdAt: 'asc' },
-                take: 50, // Lấy 50 tin nhắn gần nhất
-                include: { user: { select: { username: true } } } // Lấy cả username của người gửi
+                // take: 100, // Bỏ giới hạn số lượng, lấy hết trong 24h
+                include: { user: { select: { username: true } } }
             });
 
-            // Format lại dữ liệu trước khi gửi về client
-            const formattedMessages = messages.map(msg => ({
+            console.log(`Sending ${messages.length} messages (last 24h) for room ${room} to ${username}`);
+            socket.emit('loadHistory', messages.map(msg => ({
                 username: msg.user.username,
                 text: msg.text,
                 room: msg.room,
-                createdAt: msg.createdAt.toISOString() // Gửi dạng ISO string cho nhất quán
-            }));
+                createdAt: msg.createdAt
+            })));
 
-            socket.emit('loadHistory', formattedMessages);
-            // Thông báo cho user biết đã vào phòng thành công
-            socket.emit('joinedRoom', { room: targetRoom });
-            console.log(`Sent history and joined confirmation to ${currentUsername} for room ${targetRoom}`);
-
+            socket.emit('joinedRoom', { room }); // Xác nhận đã vào phòng
         } catch (error) {
-            console.error(`Error fetching history for room ${targetRoom}:`, error);
-            socket.emit('chatError', { message: `Error loading chat history for room ${targetRoom}.` });
+            console.error(`Error fetching history for room ${room}:`, error);
+            socket.emit('chatError', { message: `Error loading message history.` });
         }
     });
 
-    // Xử lý khi user gửi tin nhắn
     socket.on('sendMessage', async (data) => {
         const senderInfo = activeUsers[socket.id];
-
         if (!senderInfo) {
-            console.error("Error sending message: User info not found for socket:", socket.id);
-            socket.emit('chatError', { message: 'Authentication error. Please refresh and log in again.' });
+            console.error("Auth Error: User info not found for socket:", socket.id);
+            socket.emit('chatError', { message: 'Authentication error. Please refresh.' });
             return;
         }
 
         const { message, room } = data;
-        const { username } = senderInfo;
-        // Lấy userId từ senderInfo và đảm bảo nó là số nguyên
-        const userIdFromString = senderInfo.userId; // Đây là string từ localStorage
-        const userIdInt = parseInt(userIdFromString, 10); // *** SỬA LỖI Ở ĐÂY *** Chuyển sang số nguyên
+        const { username, userId } = senderInfo; // userId là string
 
-        if (!message || !room) {
-            console.error("Error sending message: Missing message or room", { message, room });
-            socket.emit('chatError', { message: 'Cannot send empty message or message without a room.' });
+        const userIdInt = parseInt(userId, 10);
+        if (isNaN(userIdInt)) {
+            console.error(`Validation Error: Invalid userId format. SocketId: ${socket.id}, userId: ${userId}`);
+            socket.emit('chatError', { message: 'Internal server error processing request.' });
             return;
         }
 
-        if (isNaN(userIdInt)) {
-             console.error("Error sending message: Invalid userId after parseInt", { userIdFromString, userIdInt });
-             socket.emit('chatError', { message: 'Internal error: Invalid user ID.' });
+        if (!room) {
+            console.error("Input Error: Room not specified by client.");
+            socket.emit('chatError', { message: 'No room selected.' });
+            return;
+        }
+        if (!message || message.trim().length === 0) {
+             console.log(`Input Info: Empty message ignored from ${username}.`);
+             // Không cần gửi lỗi về client nếu tin nhắn rỗng
+             // socket.emit('chatError', { message: 'Message cannot be empty.' });
              return;
         }
 
-        console.log(`Attempting to save message from ${username} (ID: ${userIdInt}) in room ${room}: ${message}`);
+        console.log(`Message from ${username} (ID: ${userIdInt}) in room ${room}: ${message}`);
 
-        // Lưu tin nhắn vào database
         try {
             const savedMessage = await prisma.message.create({
                 data: {
-                    text: message,
+                    text: message, // Lưu nội dung gốc
                     room: room,
-                    userId: userIdInt, // <-- Sử dụng userId đã được parseInt
+                    userId: userIdInt, // Dùng ID dạng số
                 }
             });
-            console.log(`Message saved successfully. ID: ${savedMessage.id}`);
 
-            // Gửi tin nhắn đến tất cả mọi người trong phòng đó (bao gồm cả người gửi)
+            // Gửi lại cho tất cả trong phòng (bao gồm người gửi)
             io.to(room).emit('newMessage', {
-                username: username,
+                username: username, // Gửi username của người gửi
                 text: savedMessage.text,
                 room: savedMessage.room,
-                createdAt: savedMessage.createdAt.toISOString() // Gửi dạng ISO string
+                createdAt: savedMessage.createdAt
             });
 
         } catch (error) {
-            // Phân biệt lỗi validation và lỗi server khác nếu cần
-             if (error.code === 'P2002' || error.code === 'P2003') { // Ví dụ: Lỗi khóa ngoại
-                 console.error("Error saving message (Foreign Key or Unique Constraint):", error);
-                 socket.emit('chatError', { message: 'Error sending message due to data conflict.' });
-             } else if (error instanceof require('@prisma/client/runtime/library').PrismaClientValidationError) {
-                 console.error("Error saving message (Validation Error):", error);
-                 socket.emit('chatError', { message: 'Error sending message. Invalid data format.'});
-             }
-             else {
-                console.error("!!! ERROR SAVING MESSAGE !!!:", error); // Log lỗi chi tiết
-                socket.emit('chatError', { message: 'Server error occurred while sending message.' });
+            console.error("Error saving message:", error);
+             if (error.code === 'P2003') { // Lỗi khóa ngoại
+                 console.error(`Foreign key constraint failed for userId: ${userIdInt}`);
+                 socket.emit('chatError', { message: 'Error sending message: Invalid user data.' });
+             } else if (error instanceof Prisma.PrismaClientValidationError) {
+                 console.error("Prisma Validation Error:", error.message);
+                 socket.emit('chatError', { message: 'Error sending message: Invalid data format.' });
+             } else {
+                 socket.emit('chatError', { message: 'Error sending message.' });
              }
         }
     });
 
-    // Xử lý khi user đổi phòng (hoặc rời đi mà không ngắt kết nối)
     socket.on('leaveRoom', (room) => {
         const userInfo = activeUsers[socket.id];
         if (userInfo && userInfo.currentRoom === room) {
-            console.log(`${userInfo.username} (Socket: ${socket.id}) left room ${room}`);
+            console.log(`${userInfo.username} left room ${room}`);
             socket.leave(room);
             socket.to(room).emit('userLeft', { username: userInfo.username });
-            // Cập nhật user không còn ở phòng này nữa, nhưng vẫn giữ thông tin user
             userInfo.currentRoom = null;
-        } else if (userInfo) {
-             console.log(`User ${userInfo.username} tried to leave room ${room}, but was in ${userInfo.currentRoom}`);
-        } else {
-             console.log(`Socket ${socket.id} tried to leave room ${room} but user info not found.`);
         }
     });
 
-
-    // Xử lý khi user ngắt kết nối hoàn toàn
     socket.on('disconnect', (reason) => {
         const userInfo = activeUsers[socket.id];
         if (userInfo) {
-            console.log(`${userInfo.username} (Socket: ${socket.id}) disconnected. Reason: ${reason}`);
-            // Thông báo cho những người trong phòng cuối cùng của user biết họ đã rời đi
+            console.log(`${userInfo.username} disconnected. Reason: ${reason}`);
             if (userInfo.currentRoom) {
                 socket.to(userInfo.currentRoom).emit('userLeft', { username: userInfo.username });
-                 console.log(`Notified room ${userInfo.currentRoom} about ${userInfo.username} leaving.`);
             }
-            delete activeUsers[socket.id]; // Xóa user khỏi danh sách active
-            console.log("Remaining active users:", Object.keys(activeUsers).length);
+            delete activeUsers[socket.id];
         } else {
-            console.log(`Socket ${socket.id} disconnected without user info found. Reason: ${reason}`);
+             console.log('A user disconnected without joining a room:', socket.id, `Reason: ${reason}`);
         }
     });
+
+     socket.on('error', (err) => {
+        console.error(`Socket Error for ${socket.id}:`, err);
+     });
 });
 
-// Xử lý lỗi chung (ví dụ: không tìm thấy route) - Đặt ở cuối cùng
-app.use((req, res, next) => {
-  res.status(404).send("Sorry, can't find that!");
-});
-
-// Middleware xử lý lỗi chung của Express - Đặt ở cuối cùng
+// Optional: Express Error Handling Middleware (cuối cùng)
 app.use((err, req, res, next) => {
-  console.error("!!! UNHANDLED EXPRESS ERROR !!!:", err.stack);
-  res.status(500).send('Something broke on the server!');
+  console.error("Unhandled Express Error:", err.stack);
+  res.status(500).send('Internal Server Error!');
 });
 
-
-// Khởi động server
+// Start Server
 server.listen(PORT, () => {
-    console.log(`------------------------------------`);
-    console.log(`Server listening on port ${PORT}`);
-    console.log(`Access the app at: http://localhost:${PORT}`); // Hoặc URL public nếu có
-    console.log(`------------------------------------`);
-});
-
-// Đóng Prisma Client khi ứng dụng tắt (quan trọng cho clean shutdown)
-process.on('SIGINT', async () => {
-    console.log('Received SIGINT. Closing server and Prisma Client...');
-    await prisma.$disconnect();
-    server.close(() => {
-        console.log('Server closed.');
-        process.exit(0);
-    });
-});
-process.on('SIGTERM', async () => {
-     console.log('Received SIGTERM. Closing server and Prisma Client...');
-    await prisma.$disconnect();
-    server.close(() => {
-        console.log('Server closed.');
-        process.exit(0);
-    });
+    console.log(`🚀 Server listening on *:${PORT}`);
 });
